@@ -4,6 +4,14 @@
 #include <stdio.h>
 
 
+#define CHECK_CUDA_ERROR(call) { \
+    cudaError_t err = call;     \
+    if (err != cudaSuccess) {   \
+        fprintf(stderr, "CUDA error in file '%s' in line %i: %s.\n", __FILE__, __LINE__, cudaGetErrorString(err)); \
+        exit(EXIT_FAILURE);     \
+    }                           \
+}
+
 __device__ int getGlobalIdx3D() {
     int threadsPerBlock = blockDim.x * blockDim.y * blockDim.z;
     int blockOffset = blockIdx.z * gridDim.y * gridDim.x + blockIdx.y * gridDim.x + blockIdx.x;
@@ -27,7 +35,6 @@ __host__ void sum3ArraysCPU(int* array1, int* array2, int*array3, int* output, u
     }
 }
 
-
 int* createRandomArray(unsigned int size) {
     int* array = (int*)malloc(size * sizeof(int));
 
@@ -47,15 +54,15 @@ int* createRandomArray(unsigned int size) {
 
 int* moveArrayToDevice(int* h_array, unsigned int size) {
     int* d_array;
-    cudaMalloc(&d_array, size * sizeof(int));
-    cudaMemcpy(d_array, h_array, size * sizeof(int), cudaMemcpyHostToDevice);
+    CHECK_CUDA_ERROR(cudaMalloc(&d_array, size * sizeof(int)));
+    CHECK_CUDA_ERROR(cudaMemcpy(d_array, h_array, size * sizeof(int), cudaMemcpyHostToDevice));
 
     return d_array;
 }
 
 
 int main() {
-    const long size = 1 << 28;
+    const long size = 1 << 22;
 
     // Seed the random number generator
     srand(static_cast<unsigned int>(time(nullptr)));
@@ -83,7 +90,7 @@ int main() {
 
         clock_t start = clock();
         sum3Arrays<<<grid, block>>>(d_array1, d_array2, d_array3, d_output, size);
-        cudaDeviceSynchronize();
+        CHECK_CUDA_ERROR(cudaDeviceSynchronize());
         clock_t end = clock();
 
         clock_cycles[i] = end - start;
@@ -91,7 +98,7 @@ int main() {
 
     // Copy the result back to the host
     clock_t start_dtoh = clock();
-    cudaMemcpy(h_output, d_output, size * sizeof(int), cudaMemcpyDeviceToHost);
+    CHECK_CUDA_ERROR(cudaMemcpy(h_output, d_output, size * sizeof(int), cudaMemcpyDeviceToHost));
     clock_t end_dtoh = clock();
 
     clock_t start_cpu = clock();
@@ -124,6 +131,18 @@ int main() {
     float dtoh_duration = (float)(end_dtoh - start_dtoh) / CLOCKS_PER_SEC;
     printf("Device to host duration: %4.6f\n", dtoh_duration);
 
-    cudaDeviceReset();
+    CHECK_CUDA_ERROR(cudaFree(d_array1));
+    CHECK_CUDA_ERROR(cudaFree(d_array2));
+    CHECK_CUDA_ERROR(cudaFree(d_array3));
+    CHECK_CUDA_ERROR(cudaFree(d_output));
+
+    free(h_array1);
+    free(h_array2);
+    free(h_array3);
+    free(h_output);
+    free(actual_sum);
+    free(clock_cycles);
+
+    CHECK_CUDA_ERROR(cudaDeviceReset());
     return 0;
 }
