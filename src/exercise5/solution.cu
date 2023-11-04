@@ -16,19 +16,18 @@
 __global__ void gpuRecursiveReduce(int* g_idata, int* g_odata, unsigned int isize) {
     int tid = threadIdx.x;
 
-    printf("Thread ID %d, Block ID %d\n", tid, blockIdx.x);
-
     int* idata = g_idata + blockIdx.x * blockDim.x;
     int* odata = &g_odata[blockIdx.x];
 
-    if (isize == 0 && tid == 0) {
+    if (isize == 2 && tid == 0) {
         g_odata[blockIdx.x] = idata[0] + idata[1];
         return;
     }
     int istride = isize >> 1;
 
-    if (istride > 1 && tid < istride)
+    if (istride > 1 && tid < istride) {
         idata[tid] += idata[tid + istride];
+    }
 
     if (tid == 0)
         gpuRecursiveReduce<<<1, istride>>>(idata, odata, istride);
@@ -56,7 +55,7 @@ int main() {
     int input_byte_size = input_size * sizeof(int);
 
     int block_size = 128;
-    int grid_size = input_size / block_size + 1;
+    int grid_size = input_size / block_size;
 
     int* input_data = createRandomArray(input_size);
     int* output_data = (int*)malloc(grid_size);
@@ -72,8 +71,7 @@ int main() {
     dim3 block(block_size);
     dim3 grid(grid_size);
 
-    gpuRecursiveReduce<<<grid, block>>>(input_data, output_data, input_size);
-
+    gpuRecursiveReduce<<<grid, block>>>(device_input_data, device_output_data, input_size);
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
     cudaMemcpy(output_data, device_output_data, input_byte_size, cudaMemcpyDeviceToHost);
@@ -82,13 +80,13 @@ int main() {
     for (int i = 0; i < grid_size; i++) {
         gpu_sum += output_data[i];
     }
-    printf("GPU sum is %d", gpu_sum);
+    printf("GPU sum is %d\n", gpu_sum);
 
     int cpu_sum = 0;
     for (int i = 0; i < input_size; i++) {
         cpu_sum += input_data[i];
     }
-    printf("CPU sum is %d", cpu_sum);
+    printf("CPU sum is %d\n", cpu_sum);
 
     CHECK_CUDA_ERROR(cudaDeviceReset());
     return 0;
