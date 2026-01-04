@@ -40,18 +40,6 @@ void initialize_matrix(float *mat, int rows, int cols) {
     }
 }
 
-void print_matrix(float *mat, int rows, int cols, const char *name) {
-    printf("\n%s (%dx%d):\n", name, rows, cols);
-    for (int i = 0; i < rows && i < 8; i++) {
-        for (int j = 0; j < cols && j < 8; j++) {
-            printf("%.1f ", mat[i * cols + j]);
-        }
-        if (cols > 8) printf("...");
-        printf("\n");
-    }
-    if (rows > 8) printf("...\n");
-}
-
 void verify_result(float *A, float *B, float *C, int M, int N, int K) {
     // Check a few elements
     int errors = 0;
@@ -72,7 +60,7 @@ void verify_result(float *A, float *B, float *C, int M, int N, int K) {
         }
     }
     if (errors == 0) {
-        printf("Verification PASSED!\n");
+        //printf("Verification PASSED!\n");
     } else {
         printf("Verification FAILED with %d errors!\n", errors);
     }
@@ -88,7 +76,7 @@ int main() {
     size_t bytes_B = K * N * sizeof(float);
     size_t bytes_C = M * N * sizeof(float);
 
-    printf("Matrix Multiplication: C(%dx%d) = A(%dx%d) * B(%dx%d)\n", M, N, M, K, K, N);
+    //printf("Matrix Multiplication: C(%dx%d) = A(%dx%d) * B(%dx%d)\n", M, N, M, K, K, N);
 
     // Allocate host memory
     float *h_A = (float*)malloc(bytes_A);
@@ -98,10 +86,6 @@ int main() {
     // Initialize matrices
     initialize_matrix(h_A, M, K);
     initialize_matrix(h_B, K, N);
-
-    // Print small portion of input matrices
-    print_matrix(h_A, M, K, "Matrix A");
-    print_matrix(h_B, K, N, "Matrix B");
 
     // Allocate device memory
     float *d_A, *d_B, *d_C;
@@ -118,46 +102,14 @@ int main() {
     dim3 gridDim((N + blockDim.x - 1) / blockDim.x,
                  (M + blockDim.y - 1) / blockDim.y);
 
-    printf("\nLaunching kernel with grid(%d, %d) and block(%d, %d)\n",
-           gridDim.x, gridDim.y, blockDim.x, blockDim.y);
-
-    // Create CUDA events for timing
-    cudaEvent_t start, stop;
-    CHECK_CUDA_ERROR(cudaEventCreate(&start));
-    CHECK_CUDA_ERROR(cudaEventCreate(&stop));
-
     // Launch kernel and measure time
-    CHECK_CUDA_ERROR(cudaEventRecord(start));
     matmul_naive<<<gridDim, blockDim>>>(d_A, d_B, d_C, M, N, K);
-    CHECK_CUDA_ERROR(cudaEventRecord(stop));
-
-    // Wait for completion
-    CHECK_CUDA_ERROR(cudaEventSynchronize(stop));
-
-    // Calculate elapsed time
-    float milliseconds = 0;
-    CHECK_CUDA_ERROR(cudaEventElapsedTime(&milliseconds, start, stop));
 
     // Copy result back to host
     CHECK_CUDA_ERROR(cudaMemcpy(h_C, d_C, bytes_C, cudaMemcpyDeviceToHost));
 
-    // Print results
-    print_matrix(h_C, M, N, "Result Matrix C");
-
-    printf("\nKernel execution time: %.3f ms\n", milliseconds);
-
-    // Calculate and print performance metrics
-    long long num_ops = 2LL * M * N * K;  // multiply-add counts as 2 ops
-    double gflops = (num_ops / (milliseconds / 1000.0)) / 1e9;
-    printf("Performance: %.2f GFLOPS\n", gflops);
-
-    // Verify correctness
-    printf("\nVerifying result...\n");
     verify_result(h_A, h_B, h_C, M, N, K);
 
-    // Cleanup
-    CHECK_CUDA_ERROR(cudaEventDestroy(start));
-    CHECK_CUDA_ERROR(cudaEventDestroy(stop));
     CHECK_CUDA_ERROR(cudaFree(d_A));
     CHECK_CUDA_ERROR(cudaFree(d_B));
     CHECK_CUDA_ERROR(cudaFree(d_C));
