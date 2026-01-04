@@ -11,14 +11,16 @@
     }                           \
 }
 
-// Naive matrix multiplication kernel
+
+# define BLOCK_SIZE 32
+
+// Coalescing matrix multiplication kernel
 // Each thread computes one element of the output matrix C
 // C = A * B
 // A is MxK, B is KxN, C is MxN
 __global__ void matmul_naive(float *A, float *B, float *C, int M, int N, int K) {
-    // Calculate the row and column index of the C element this thread will compute
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.x;  // ✅ swap x and y
+    int col = blockIdx.x * blockDim.x + threadIdx.y;
 
     // Boundary check
     if (row < M && col < N) {
@@ -66,6 +68,10 @@ void verify_result(float *A, float *B, float *C, int M, int N, int K) {
     }
 }
 
+float CEIL_DIV(int a, int b) {
+    return (a + b - 1) / b;
+}
+
 int main() {
     // Matrix dimensions: C(M x N) = A(M x K) * B(K x N)
     int M = 10000;  // rows of A and C
@@ -96,9 +102,8 @@ int main() {
     CHECK_CUDA_ERROR(cudaMemcpy(d_B, h_B, bytes_B, cudaMemcpyHostToDevice));
 
     // Configure kernel launch parameters
-    dim3 blockDim(16, 16);  // 16x16 = 256 threads per block
-    dim3 gridDim((N + blockDim.x - 1) / blockDim.x,
-                 (M + blockDim.y - 1) / blockDim.y);
+    dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE);  // 32x32 = 1024 threads per block
+    dim3 gridDim(CEIL_DIV(M, BLOCK_SIZE), CEIL_DIV(N, BLOCK_SIZE));
 
     // Launch kernel and measure time
     matmul_naive<<<gridDim, blockDim>>>(d_A, d_B, d_C, M, N, K);
