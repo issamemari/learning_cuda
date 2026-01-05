@@ -43,8 +43,8 @@ void initialize_matrix(float *mat, int rows, int cols) {
 void verify_result(float *A, float *B, float *C, int M, int N, int K) {
     // Check a few elements
     int errors = 0;
-    for (int i = 0; i < M && i < 10; i++) {
-        for (int j = 0; j < N && j < 10; j++) {
+    for (int i = 0; i < M; i++) {
+        for (int j = 0; j < N; j++) {
             float expected = 0.0f;
             for (int k = 0; k < K; k++) {
                 expected += A[i * K + k] * B[k * N + j];
@@ -68,8 +68,8 @@ void verify_result(float *A, float *B, float *C, int M, int N, int K) {
 
 int main() {
     // Matrix dimensions: C(M x N) = A(M x K) * B(K x N)
-    int M = 10000;  // rows of A and C
-    int K = 5000;   // cols of A, rows of B
+    int M = 500;  // rows of A and C
+    int K = 500;   // cols of A, rows of B
     int N = 1024;  // cols of B and C
 
     size_t bytes_A = M * K * sizeof(float);
