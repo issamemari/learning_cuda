@@ -1,25 +1,37 @@
 #include <stdint.h>
 #include <stdio.h>
-
+#include <string.h>
+#include <chrono>
 
 #define MAX_VALUE 10000000
 #define BUCKET_BITS 8
 
-uint32_t flip_msb_int2uint(int32_t x) {
-    return x ^ 0x80000000u;
+
+uint32_t float_to_sortable(float f) {
+    uint32_t bits;
+    memcpy(&bits, &f, sizeof(float));
+    // If sign bit is set (negative), flip all bits
+    // If sign bit is clear (positive), flip only sign bit
+    uint32_t mask = (bits & 0x80000000u) ? 0xFFFFFFFFu : 0x80000000u;
+    return bits ^ mask;
 }
 
-int32_t flib_msb_uint2int(uint32_t x) {
-    return x ^ 0x80000000u;
+float sortable_to_float(uint32_t bits) {
+    // Reverse the transformation
+    uint32_t mask = (bits & 0x80000000u) ? 0x80000000u : 0xFFFFFFFFu;
+    bits = bits ^ mask;
+    float f;
+    memcpy(&f, &bits, sizeof(float));
+    return f;
 }
 
 typedef struct {
-    int* data;
+    uint32_t* data;
     int length;
-} IntArray;
+} UintArray;
 
 
-IntArray compute_topk_recursive(
+UintArray compute_topk_recursive(
     uint32_t* array,
     uint32_t* bucketsArray,
     uint32_t* bucketStarts,
@@ -60,9 +72,9 @@ IntArray compute_topk_recursive(
         bucketEnds[bucket] += 1;
     }
 
-    IntArray result;
+    UintArray result;
     result.length = 0;
-    result.data = (int32_t*)malloc(K * sizeof(uint32_t)); // allocate K items, might be shorter
+    result.data = (uint32_t*)malloc(K * sizeof(uint32_t)); // allocate K items, might be shorter
 
     // Now we scan from the highest bucket downward
     for (uint32_t bucket = bucketCount; bucket-- > 0; ) {
@@ -91,11 +103,12 @@ IntArray compute_topk_recursive(
             uint32_t bucketStart = bucketStarts[bucket];
             memset(bucketStarts, 0, bucketCount * sizeof(uint32_t));
             memset(bucketEnds, 0, bucketCount * sizeof(uint32_t));
-            IntArray subResult = compute_topk_recursive(&bucketsArray[bucketStart], array, bucketStarts, bucketEnds, countOfThisBucket, needed, pass - 1);
+            UintArray subResult = compute_topk_recursive(&bucketsArray[bucketStart], array, bucketStarts, bucketEnds, countOfThisBucket, needed, pass - 1);
             for (uint32_t i = 0; i < subResult.length; i++) {
                 result.data[result.length + i] = subResult.data[i];
             }
             result.length += subResult.length;
+            free(subResult.data);
             return result;
         }
     }
@@ -103,30 +116,38 @@ IntArray compute_topk_recursive(
     return result;
 }
 
-IntArray compute_topk(int32_t* array, uint32_t N, uint32_t K) {
-    IntArray finalResult;
+typedef struct {
+    float* data;
+    int length;
+} FloatArray;
+
+FloatArray compute_topk(float* array, uint32_t N, uint32_t K) {
+    FloatArray finalResult;
     if (N <= K) {
         finalResult.length = N;
-        finalResult.data = (int32_t*)malloc(N * sizeof(int32_t));
-        for (int i = 0; i < N; i++) finalResult.data[i] = array[i];
+        finalResult.data = (float*)malloc(N * sizeof(float));
+        for (uint32_t i = 0; i < N; i++) finalResult.data[i] = array[i];
         return finalResult;
     }
 
     uint32_t* arrayTransformed = (uint32_t*)malloc(N * sizeof(uint32_t));
-    for (uint32_t i = 0; i < N; i++) arrayTransformed[i] = flip_msb_int2uint(array[i]);
+    for (uint32_t i = 0; i < N; i++) arrayTransformed[i] = float_to_sortable(array[i]);
 
     uint32_t* bucketsArray = (uint32_t*)malloc(N * sizeof(uint32_t));
 
     uint32_t* bucketStarts = (uint32_t*)calloc(1 << BUCKET_BITS, sizeof(uint32_t));
     uint32_t* bucketEnds = (uint32_t*)calloc(1 << BUCKET_BITS, sizeof(uint32_t));
 
-    IntArray result = compute_topk_recursive(arrayTransformed, bucketsArray, bucketStarts, bucketEnds, N, K, 3);
+    UintArray result = compute_topk_recursive(arrayTransformed, bucketsArray, bucketStarts, bucketEnds, N, K, 3);
 
     finalResult.length = result.length;
-    finalResult.data = (int32_t*)malloc(result.length * sizeof(int32_t));
+    finalResult.data = (float*)malloc(result.length * sizeof(float));
 
-    for (uint32_t i = 0; i < result.length; i++) finalResult.data[i] = flib_msb_uint2int(result.data[i]);
+    for (uint32_t i = 0; i < result.length; i++) finalResult.data[i] = sortable_to_float(result.data[i]);
 
+    free(result.data);
+    free(bucketEnds);
+    free(bucketStarts);
     free(bucketsArray);
     free(arrayTransformed);
 
@@ -134,7 +155,7 @@ IntArray compute_topk(int32_t* array, uint32_t N, uint32_t K) {
 }
 
 
-void verify_result(int32_t *A, int32_t *R, int N, int K) {
+void verify_result(float *A, float *R, int N, int K) {
     for (int i = 0; i < N; i++) {
         bool is_topk = false;
         for (int j = 0; j < K; j++) {
@@ -146,7 +167,7 @@ void verify_result(int32_t *A, int32_t *R, int N, int K) {
         if (!is_topk) {
             for (int j = 0; j < K; j++) {
                 if (A[i] > R[j]) {
-                    fprintf(stderr, "Verification FAILED! A[%d]=%d is greater than R[%d]=%d\n", i, A[i], j, R[j]);
+                    fprintf(stderr, "Verification FAILED! A[%d]=%.2f is greater than R[%d]=%.2f\n", i, A[i], j, R[j]);
                     return;
                 }
             }
@@ -157,14 +178,34 @@ void verify_result(int32_t *A, int32_t *R, int N, int K) {
 
 
 int radix_select(uint32_t N, uint32_t K) {
-    int32_t* array = (int32_t*)malloc(N * sizeof(int32_t));
+    printf("=== Radix Select TopK (CPU) ===\n");
+    printf("N = %d, K = %d\n\n", N, K);
+
+    // Step 1: Data preparation
+    auto start = std::chrono::high_resolution_clock::now();
+
+    float* array = (float*)malloc(N * sizeof(float));
     for (uint32_t i = 0; i < N; i++) {
-        array[i] = (int32_t)(rand() % MAX_VALUE) - MAX_VALUE / 2;
+        array[i] = (float)(rand() % MAX_VALUE);
     }
 
-    IntArray result = compute_topk(array, N, K);
+    auto end = std::chrono::high_resolution_clock::now();
+    double milliseconds = std::chrono::duration<double, std::milli>(end - start).count();
+    printf("Step 1 - Data preparation: %.3f ms\n", milliseconds);
 
-    //verify_result(array, result.data, N, K);
+    // Step 2: Compute top-K using radix select
+    start = std::chrono::high_resolution_clock::now();
+
+    FloatArray result = compute_topk(array, N, K);
+
+    end = std::chrono::high_resolution_clock::now();
+    milliseconds = std::chrono::duration<double, std::milli>(end - start).count();
+    printf("Step 2 - Radix select: %.3f ms\n\n", milliseconds);
+
+    verify_result(array, result.data, N, K);
+
+    free(result.data);
+    free(array);
 
     return 0;
 }
@@ -183,7 +224,6 @@ int main(int argc, char* argv[]) {
         printf("Cannot start radix select with N=%d, K=%d. Both numbers must be positive\n", N, K);    
     }
 
-    printf("Running radix select with N=%d, K=%d\n", N, K);
     radix_select(N, K);
 
     return 0;
