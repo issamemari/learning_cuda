@@ -51,10 +51,10 @@ void verify_bucket_counts(float *h_array, uint32_t N, uint32_t *gpu_counts, uint
 }
 
 __global__ void count_buckets(float *inputArray, uint32_t N, uint32_t *bucketCounts, uint32_t pass) {
-    __shared__ uint32_t sharedBucketCounts[NUM_BUCKETS];
+    __shared__ uint32_t sharedBucketCounts[NUM_BUCKETS * WARP_SIZE];
 
     uint32_t tid = threadIdx.x;
-    for (uint32_t i = tid; i < NUM_BUCKETS; i += blockDim.x) {
+    for (uint32_t i = tid; i < NUM_BUCKETS * WARP_SIZE; i += blockDim.x) {
         sharedBucketCounts[i] = 0;
     }
     __syncthreads();
@@ -63,21 +63,18 @@ __global__ void count_buckets(float *inputArray, uint32_t N, uint32_t *bucketCou
     if (index < N) {
         uint32_t value = float_to_sortable(inputArray[index]);
         uint32_t bucket = (value >> (pass * BUCKET_BITS)) & (NUM_BUCKETS - 1);
-
-        for (uint32_t b = 0; b < NUM_BUCKETS; b++) {
-            uint32_t ballot = __ballot_sync(0xFFFFFFFF, bucket == b);
-
-            if (index % WARP_SIZE == 0) {
-                uint32_t count = __popc(ballot);
-                atomicAdd(&sharedBucketCounts[b], count);
-            }
-        }
+        uint32_t warpId = tid / WARP_SIZE;
+        atomicAdd(&sharedBucketCounts[warpId * NUM_BUCKETS + bucket], 1);
     }
     __syncthreads();
 
     for (uint32_t i = tid; i < NUM_BUCKETS; i += blockDim.x) {
-        if (sharedBucketCounts[i] > 0) {
-            atomicAdd(&bucketCounts[i], sharedBucketCounts[i]);
+        uint32_t bucketSum = 0;
+        for (uint32_t w = 0; w < (blockDim.x / WARP_SIZE); w++) {
+            bucketSum += sharedBucketCounts[w * NUM_BUCKETS + i];
+        }
+        if (bucketSum > 0) {
+            atomicAdd(&bucketCounts[i], bucketSum);
         }
     }
 }
